@@ -1203,7 +1203,15 @@ def manejar_entradas(message):
     bot.reply_to(message, "💡 Usa `/menu` para ir al inicio:", reply_markup=boton_volver_menu(), parse_mode="Markdown")
 
 # ================= ARRANQUE =================
+# ================= ARRANQUE =================
 if __name__ == "__main__":
+    # Arranca Flask en segundo plano
     keep_alive()
-    print("🚀 Bot SA SHOP Pro Directo 24/7 activo con administración total de catálogo...")
-    bot.infinity_polling()
+    print("🚀 Bot SA SHOP Pro Directo 24/7 activo...")
+    # Arranca el bot de Telegram de manera continua
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"⚠️ Error en polling: {e}")
+            time.sleep(5)
