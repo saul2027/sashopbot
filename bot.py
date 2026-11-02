@@ -243,39 +243,52 @@ def enviar_archivo_txt(chat_id, contenido_texto, nombre_archivo, caption=""):
 def verificar_pago_binance(order_id_cliente, monto_esperado):
     url = "https://bpay.binanceapi.com/binancepay/openapi/v2/order/query"
     timestamp = int(time.time() * 1000)
-    query_string = urlencode({"timestamp": timestamp, "limit": 50})
+    nonce = "".join(random.choices(string.ascii_letters + string.digits, k=32))
     
+    body = {
+        "prepayId": str(order_id_cliente).strip()
+    }
+    body_str = json.dumps(body)
+    
+    payload_signature = f"{timestamp}\n{nonce}\n{body_str}\n"
     signature = hmac.new(
         BINANCE_SECRET_KEY.encode("utf-8"),
-        query_string.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
+        payload_signature.encode("utf-8"),
+        hashlib.sha512
+    ).hexdigest().upper()
     
-    headers = {"X-MBX-APIKEY": BINANCE_API_KEY}
-    full_url = f"{url}?{query_string}&signature={signature}"
+    headers = {
+        "Content-Type": "application/json",
+        "BinancePay-Timestamp": str(timestamp),
+        "BinancePay-Nonce": nonce,
+        "BinancePay-Certificate-Serial": BINANCE_API_KEY,
+        "BinancePay-Signature": signature
+    }
     
-    try:
-        resp = requests.get(full_url, headers=headers, timeout=10).json()
-        if not resp.get("success"):
-            return False, "Error conectando con la API de Binance."
+            try:
+        resp = requests.post(url, data=body_str, headers=headers, timeout=10).json()
         
-        for tx in resp.get("data", []):
-            tx_order_id = str(tx.get("orderId", ""))
-            tx_prepay_id = str(tx.get("prepayId", ""))
-            monto_tx = float(tx.get("amount", 0))
-            moneda = tx.get("currency", "")
+        if resp.get("status") != "SUCCESS" or not resp.get("data"):
+            return False, "Error conectando con la API de Binance."
             
-            id_limpio = str(order_id_cliente).strip()
-            if (id_limpio == tx_order_id or id_limpio == tx_prepay_id):
-                if moneda != "USDT":
-                    return False, f"La moneda es {moneda}. Solo se acepta USDT."
-                if abs(monto_tx - monto_esperado) > 0.05:
-                    return False, f"Monto incorrecto. Pagaste {monto_tx} USDT y se requerían {monto_esperado} USDT."
-                return True, monto_tx
-                
-        return False, "No se encontró ese ID de orden en Binance Pay."
+        order_data = resp.get("data", {})
+        estado = order_data.get("status")
+        monto_tx = float(order_data.get("totalFee", 0))
+        moneda = order_data.get("currency", "")
+        
+        if estado != "SUCCESS":
+            return False, f"El pago aún no se completa. Estado: {estado}"
+            
+        if moneda != "USDT":
+            return False, f"La moneda es {moneda}. Solo se acepta USDT."
+            
+        if abs(monto_tx - monto_esperado) > 0.05:
+            return False, f"Monto incorrecto. Pagaste {monto_tx} USDT y se requerían {monto_esperado} USDT."
+            
+        return True, monto_tx
+
     except Exception as e:
-        return False, f"Error de red: {e}"
+        return False, f"Error en la validación: {str(e)}"
 
 # ================= VISTAS DE MENÚ =================
 def vista_menu_principal(user):
