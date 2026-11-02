@@ -35,7 +35,7 @@ CATALOGO_INICIAL = {
     "Canva Pro a correo 12 meses": (1.00, "Activación directa a tu correo"),
     "Surf Shark 10 dias": (1.00, "Cuenta Privada email:pass"),
     "Surf Shark 12 meses": (9.00, "Cuenta Privada email:pass"),
-    "Apple TV 1 mes Link": (1.00, "Link de Activacion"),
+    "Apple TV 1 mes Link": (1.00, "Link de Activacion")
 }
 
 # =====================================================================
@@ -883,7 +883,6 @@ def callbacks(call):
             compras_pendientes[user_id]["cantidad"] = cant_actual
             total_pagar = cant_actual * precio_unit
             
-            # Formato de pago ordenado con los datos de Binance Pay y el QR solicitado
             texto_pago = (
                 f"💎 *PAGO DIRECTO CON BINANCE PAY* 💎\n\n"
                 f"📦 **Producto:** {producto} (x{cant_actual})\n\n"
@@ -898,13 +897,11 @@ def callbacks(call):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("❌ Cancelar", callback_data="catalogo"))
             
-            # Borramos el mensaje anterior y enviamos la foto del QR de Binance junto con el texto de pago
             try:
                 bot.delete_message(chat_id, msg_id)
             except Exception:
                 pass
             
-            # Usamos el enlace directo del QR proporcionado
             qr_url = "https://i.ibb.co/68Hn6Wf/image-2e9128.png"
             bot.send_photo(chat_id, qr_url, caption=texto_pago, reply_markup=markup, parse_mode="Markdown")
             return
@@ -1162,7 +1159,6 @@ def manejar_entradas(message):
         conn = get_db()
         c = conn.cursor()
         
-        # Inserción optimizada por lotes para soportar de 30 a 1000+ cuentas/links
         registros = [(producto, cred) for cred in lineas]
         c.executemany("INSERT INTO stock (producto, credenciales) VALUES (%s, %s)", registros)
         
