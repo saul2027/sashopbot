@@ -265,26 +265,26 @@ def verificar_pago_binance(order_id_cliente, monto_esperado):
         "BinancePay-Signature": signature
     }
     
-        try:
+            try:
         resp = requests.post(url, data=body_str, headers=headers, timeout=10).json()
-        
+
         if resp.get("status") != "SUCCESS" or not resp.get("data"):
             return False, "Error conectando con la API de Binance."
-            
+
         order_data = resp.get("data", {})
         estado = order_data.get("status")
         monto_tx = float(order_data.get("totalFee", 0))
         moneda = order_data.get("currency", "")
-        
+
         if estado != "SUCCESS":
             return False, f"El pago aún no se completa. Estado: {estado}"
-            
+
         if moneda != "USDT":
             return False, f"La moneda es {moneda}. Solo se acepta USDT."
-            
+
         if abs(monto_tx - monto_esperado) > 0.05:
             return False, f"Monto incorrecto. Pagaste {monto_tx} USDT y se requerían {monto_esperado} USDT."
-            
+
         return True, monto_tx
 
     except Exception as e:
