@@ -2,7 +2,7 @@ import io
 import time
 import hmac
 import hashlib
-import sqlite3
+import psycopg2
 import requests
 import os
 from threading import Thread
@@ -21,23 +21,29 @@ BINANCE_PAY_ID = "884195829"
 BINANCE_API_KEY = "NCztoP5SVCX71cehqZeKTdEOntTGpYDRw3M0NNpSEgxFifgtiMErhbsSIcnVn4TW"
 BINANCE_SECRET_KEY = "31skkrCvejqUclA2tn5A5gprMZ3t8HvfVn1FTKYZvpn5eqUbEyG2de5ftR5oW4tL"
 
+# Tu enlace de Supabase (Reemplaza [YOUR-PASSWORD] por tu contraseña real)
+DATABASE_URL = "postgresql://postgres:saul20262026202@db.lckxsqdgmawjytbnzqab.supabase.co:5432/postgres"
+
 CATALOGO_INICIAL = {
-    "Gemini Pro": (2.00, "Cuenta email:pass"),
-    "Max Completa": (2.00, "Cuenta completa"),
-    "Prime Video Completa": (3.00, "Cuenta completa"),
+    "Gemini Pro": (3.00, "Cuenta completa email:pass"),
+    "ChatGPT Plus": (4.50, "Cuenta completa email:pass"),
+    "Netflix Completa": (6.50, "Perfil o pantalla email:pass"),
+    "Disney+ Completa": (4.00, "Cuenta completa email:pass"),
+    "Max Completa": (3.50, "Cuenta completa email:pass"),
+    "Prime Video Completa": (3.00, "Cuenta completa email:pass"),
     "Spotify Individual": (2.00, "Invitación o cuenta email:pass"),
-    "Crunchyroll Mega Fan": (0.50, "link"),
-    "Canva Pro": (1.00, "Activación directa a tu correo")
+    "Crunchyroll Mega Fan": (2.50, "Cuenta completa email:pass"),
+    "Canva Pro": (1.50, "Activación directa a tu correo")
 }
 
 # =====================================================================
-# 🌐 MINI SERVIDOR WEB PARA 24/7 (RENDER) 🌐
+# 🌐 MINI SERVIDOR WEB PARA 24/7 (RENDER / KOYEB) 🌐
 # =====================================================================
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "¡Bot SA SHOP Pro 24/7 activo!"
+    return "¡Bot SA SHOP Pro 24/7 con Supabase activo!"
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
@@ -48,45 +54,48 @@ def keep_alive():
     t.start()
 
 # =====================================================================
-# ⚙️ MOTOR DEL BOT ⚙️
+# ⚙️ MOTOR DEL BOT Y CONEXIÓN A SUPABASE ⚙️
 # =====================================================================
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 compras_pendientes = {}
 estado_carga_admin = {}
 estado_precio_admin = {}
-estado_mod_nombre = {}         # {admin_id: producto_antiguo}
-estado_mod_desc = {}           # {admin_id: producto}
-estado_agregar_plat = {}       # {admin_id: {"paso": "nombre/precio/desc"}}
+estado_mod_nombre = {}
+estado_mod_desc = {}
+estado_agregar_plat = {}
 esperando_ticket_soporte = set()
 estado_notificacion_admin = {}
 esperando_noti_global = set()
 
+def get_db():
+    return psycopg2.connect(DATABASE_URL)
+
 def init_db():
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS usuarios (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id BIGINT PRIMARY KEY,
                     username TEXT,
                     nombre TEXT,
                     compras INTEGER DEFAULT 0,
                     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )""")
     c.execute("""CREATE TABLE IF NOT EXISTS stock (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     producto TEXT,
                     credenciales TEXT,
                     vendido INTEGER DEFAULT 0
                 )""")
     c.execute("""CREATE TABLE IF NOT EXISTS pagos_usados (
                     order_id TEXT PRIMARY KEY,
-                    user_id INTEGER,
+                    user_id BIGINT,
                     monto REAL,
                     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )""")
     c.execute("""CREATE TABLE IF NOT EXISTS historial_compras (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
                     producto TEXT,
                     credenciales TEXT,
                     precio REAL,
@@ -101,28 +110,20 @@ def init_db():
     c.execute("SELECT COUNT(*) FROM catalogo_db")
     if c.fetchone()[0] == 0:
         for prod, (precio, desc) in CATALOGO_INICIAL.items():
-            c.execute("INSERT OR REPLACE INTO catalogo_db (producto, precio, descripcion) VALUES (?, ?, ?)", (prod, precio, desc))
+            c.execute("INSERT INTO catalogo_db (producto, precio, descripcion) VALUES (%s, %s, %s) ON CONFLICT (producto) DO NOTHING", (prod, precio, desc))
 
-    for col_sql in [
-        "ALTER TABLE usuarios ADD COLUMN username TEXT",
-        "ALTER TABLE usuarios ADD COLUMN nombre TEXT",
-        "ALTER TABLE usuarios ADD COLUMN compras INTEGER DEFAULT 0",
-        "ALTER TABLE usuarios ADD COLUMN fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-    ]:
-        try:
-            c.execute(col_sql)
-        except Exception:
-            pass
     conn.commit()
+    c.close()
     conn.close()
 
 init_db()
 
 def obtener_catalogo():
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
     c.execute("SELECT producto, precio, descripcion FROM catalogo_db")
     filas = c.fetchall()
+    c.close()
     conn.close()
     return {prod: {"precio": prec, "desc": desc} for prod, prec, desc in filas}
 
@@ -153,7 +154,7 @@ def configurar_menu_comandos():
             BotCommand("cargar", "📥 Subir Stock"),
             BotCommand("agregar_plataforma", "➕ Agregar plataforma"),
             BotCommand("quitar_plataforma", "🗑️ Eliminar plataforma"),
-            BotCommand("modificar_nombre", "✏️ Cambiar nombre de plataforma"),
+            BotCommand("modificar_nombre", "✏️ Cambiar nombre"),
             BotCommand("modificar_precio", "💵 Cambiar precio"),
             BotCommand("modificar_descripcion", "📌 Cambiar descripción"),
             BotCommand("noti", "📢 Anuncio Global"),
@@ -166,21 +167,22 @@ def configurar_menu_comandos():
 configurar_menu_comandos()
 
 def registrar_o_actualizar_usuario(user):
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
     uname = user.username.lower() if user.username else ""
     nombre = user.first_name or "Usuario"
-    c.execute("INSERT OR IGNORE INTO usuarios (user_id, username, nombre, compras) VALUES (?, ?, ?, 0)",
+    c.execute("INSERT INTO usuarios (user_id, username, nombre, compras) VALUES (%s, %s, %s, 0) ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username, nombre = EXCLUDED.nombre",
               (user.id, uname, nombre))
-    c.execute("UPDATE usuarios SET username = ?, nombre = ? WHERE user_id = ?", (uname, nombre, user.id))
     conn.commit()
+    c.close()
     conn.close()
 
 def obtener_datos_usuario(user_id):
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT user_id, username, nombre, compras FROM usuarios WHERE user_id = ?", (user_id,))
+    c.execute("SELECT user_id, username, nombre, compras FROM usuarios WHERE user_id = %s", (user_id,))
     fila = c.fetchone()
+    c.close()
     conn.close()
     if not fila:
         return user_id, "Sin @username", "Cliente", 0
@@ -188,23 +190,25 @@ def obtener_datos_usuario(user_id):
 
 def buscar_id_por_id_o_username(identificador):
     limpio = identificador.strip().lstrip("@").lower()
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
     if limpio.isdigit():
-        c.execute("SELECT user_id FROM usuarios WHERE user_id = ?", (int(limpio),))
+        c.execute("SELECT user_id FROM usuarios WHERE user_id = %s", (int(limpio),))
     else:
-        c.execute("SELECT user_id FROM usuarios WHERE LOWER(username) = ?", (limpio,))
+        c.execute("SELECT user_id FROM usuarios WHERE LOWER(username) = %s", (limpio,))
     fila = c.fetchone()
+    c.close()
     conn.close()
     if fila:
         return fila[0]
     return int(limpio) if limpio.isdigit() else None
 
 def contar_stock(producto):
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM stock WHERE producto = ? AND vendido = 0", (producto,))
+    c.execute("SELECT COUNT(*) FROM stock WHERE producto = %s AND vendido = 0", (producto,))
     cantidad = c.fetchone()[0]
+    c.close()
     conn.close()
     return cantidad
 
@@ -279,7 +283,7 @@ def vista_menu_principal(user):
     uid, uname, nombre, _ = obtener_datos_usuario(user.id)
     rango = "👑 ADMINISTRADOR" if uid == ADMIN_ID else "👤 Cliente"
     texto = (
-        f"⚡ *SA SHOP — AUTOMATIC* ⚡\n\n"
+        f"⚡ *SA SHOP — TIENDA AUTOMÁTICA 24/7* ⚡\n\n"
         f"┏ 👤 *Usuario:* {nombre} (`{uname}`)\n"
         f"┣ 🎖️ *Rol:* {rango}\n"
         f"┗ 🆔 *ID:* `{uid}`\n\n"
@@ -480,10 +484,11 @@ def cmd_consultar_stock(message):
         bot.reply_to(message, "\n".join(lineas), reply_markup=boton_volver_menu(), parse_mode="Markdown")
 
         if es_admin:
-            conn = sqlite3.connect("tienda.db")
+            conn = get_db()
             c = conn.cursor()
             c.execute("SELECT id, producto, credenciales FROM stock WHERE vendido = 0 ORDER BY producto, id")
             filas = c.fetchall()
+            c.close()
             conn.close()
 
             if filas:
@@ -519,10 +524,11 @@ def cmd_consultar_stock(message):
     bot.reply_to(message, respuesta, reply_markup=boton_volver_menu(), parse_mode="Markdown")
     
     if es_admin and cant > 0:
-        conn = sqlite3.connect("tienda.db")
+        conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT id, credenciales FROM stock WHERE producto = ? AND vendido = 0", (producto_encontrado,))
+        c.execute("SELECT id, credenciales FROM stock WHERE producto = %s AND vendido = 0", (producto_encontrado,))
         filas = c.fetchall()
+        c.close()
         conn.close()
         
         contenido = f"=== STOCK DE {producto_encontrado.upper()} ({cant}) ===\n\n"
@@ -569,10 +575,11 @@ def cmd_historial_admin(message):
         return
 
     uid, uname, nombre, total_compras = obtener_datos_usuario(target_id)
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT id, producto, credenciales, precio, fecha FROM historial_compras WHERE user_id = ? ORDER BY id DESC", (uid,))
+    c.execute("SELECT id, producto, credenciales, precio, fecha FROM historial_compras WHERE user_id = %s ORDER BY id DESC", (uid,))
     compras_lista = c.fetchall()
+    c.close()
     conn.close()
 
     resumen = (
@@ -627,11 +634,12 @@ def cmd_borrar_cuenta(message):
         bot.reply_to(message, "⚠️ Uso: `/borrar [ID_DE_CUENTA]`", parse_mode="Markdown")
         return
     sid = int(partes[1])
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM stock WHERE id = ? AND vendido = 0", (sid,))
+    c.execute("DELETE FROM stock WHERE id = %s AND vendido = 0", (sid,))
     borrado = c.rowcount
     conn.commit()
+    c.close()
     conn.close()
     if borrado:
         bot.reply_to(message, f"🗑️ Cuenta ID `{sid}` eliminada del inventario.", reply_markup=boton_volver_menu(), parse_mode="Markdown")
@@ -650,11 +658,12 @@ def cmd_vaciar_producto(message):
     if not prod:
         bot.reply_to(message, "❌ Producto no encontrado.")
         return
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM stock WHERE producto = ? AND vendido = 0", (prod,))
+    c.execute("DELETE FROM stock WHERE producto = %s AND vendido = 0", (prod,))
     cant = c.rowcount
     conn.commit()
+    c.close()
     conn.close()
     bot.reply_to(message, f"🗑️ Se eliminaron `{cant}` cuentas no vendidas de *{prod}*.", reply_markup=boton_volver_menu(), parse_mode="Markdown")
 
@@ -662,7 +671,7 @@ def cmd_vaciar_producto(message):
 def cmd_stats_admin(message):
     if message.from_user.id != ADMIN_ID:
         return
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM usuarios")
     total_users = c.fetchone()[0]
@@ -672,6 +681,7 @@ def cmd_stats_admin(message):
     pagos_count, total_pagado = c.fetchone()
     c.execute("SELECT COUNT(*) FROM stock WHERE vendido = 0")
     stock_disp = c.fetchone()[0]
+    c.close()
     conn.close()
 
     texto = (
@@ -688,10 +698,11 @@ def cmd_stats_admin(message):
 def cmd_usuarios_txt(message):
     if message.from_user.id != ADMIN_ID:
         return
-    conn = sqlite3.connect("tienda.db")
+    conn = get_db()
     c = conn.cursor()
     c.execute("SELECT user_id, username, nombre, compras, fecha_registro FROM usuarios ORDER BY fecha_registro DESC")
     filas = c.fetchall()
+    c.close()
     conn.close()
 
     lineas = ["=== BASE DE DATOS DE CLIENTES ===\n"]
@@ -730,10 +741,11 @@ def callbacks(call):
         if user_id != ADMIN_ID:
             return
         producto = call.data.split("_", 1)[1]
-        conn = sqlite3.connect("tienda.db")
+        conn = get_db()
         c = conn.cursor()
-        c.execute("DELETE FROM catalogo_db WHERE producto = ?", (producto,))
+        c.execute("DELETE FROM catalogo_db WHERE producto = %s", (producto,))
         conn.commit()
+        c.close()
         conn.close()
         
         bot.answer_callback_query(call.id, f"✅ {producto} eliminado.", show_alert=True)
@@ -859,10 +871,11 @@ def callbacks(call):
 
     elif call.data == "perfil":
         uid, uname, nombre, compras = obtener_datos_usuario(user_id)
-        conn = sqlite3.connect("tienda.db")
+        conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT producto, credenciales, fecha FROM historial_compras WHERE user_id = ? ORDER BY id DESC LIMIT 5", (user_id,))
+        c.execute("SELECT producto, credenciales, fecha FROM historial_compras WHERE user_id = %s ORDER BY id DESC LIMIT 5", (user_id,))
         ultimas = c.fetchall()
+        c.close()
         conn.close()
 
         historial_txt = ""
@@ -922,11 +935,12 @@ def manejar_entradas(message):
         prod_antiguo = estado_mod_nombre.pop(user_id)
         nuevo_nombre = message.text.strip()
         
-        conn = sqlite3.connect("tienda.db")
+        conn = get_db()
         c = conn.cursor()
-        c.execute("UPDATE catalogo_db SET producto = ? WHERE producto = ?", (nuevo_nombre, prod_antiguo))
-        c.execute("UPDATE stock SET producto = ? WHERE producto = ?", (nuevo_nombre, prod_antiguo))
+        c.execute("UPDATE catalogo_db SET producto = %s WHERE producto = %s", (nuevo_nombre, prod_antiguo))
+        c.execute("UPDATE stock SET producto = %s WHERE producto = %s", (nuevo_nombre, prod_antiguo))
         conn.commit()
+        c.close()
         conn.close()
 
         bot.reply_to(message, f"✅ **¡Nombre actualizado con éxito!**\n\nDe: `{prod_antiguo}` ➔ A: `{nuevo_nombre}`", reply_markup=boton_volver_menu(), parse_mode="Markdown")
@@ -937,10 +951,11 @@ def manejar_entradas(message):
         producto = estado_mod_desc.pop(user_id)
         nueva_desc = message.text.strip()
         
-        conn = sqlite3.connect("tienda.db")
+        conn = get_db()
         c = conn.cursor()
-        c.execute("UPDATE catalogo_db SET descripcion = ? WHERE producto = ?", (nueva_desc, producto))
+        c.execute("UPDATE catalogo_db SET descripcion = %s WHERE producto = %s", (nueva_desc, producto))
         conn.commit()
+        c.close()
         conn.close()
 
         bot.reply_to(message, f"✅ **¡Descripción actualizada!**\n\n📦 Producto: `{producto}`\n📌 Nueva descripción: `{nueva_desc}`", reply_markup=boton_volver_menu(), parse_mode="Markdown")
@@ -972,10 +987,11 @@ def manejar_entradas(message):
             nombre_prod = estado["nombre"]
             precio_prod = estado["precio"]
             
-            conn = sqlite3.connect("tienda.db")
+            conn = get_db()
             c = conn.cursor()
-            c.execute("INSERT OR REPLACE INTO catalogo_db (producto, precio, descripcion) VALUES (?, ?, ?)", (nombre_prod, precio_prod, desc_prod))
+            c.execute("INSERT INTO catalogo_db (producto, precio, descripcion) VALUES (%s, %s, %s) ON CONFLICT (producto) DO UPDATE SET precio = EXCLUDED.precio, descripcion = EXCLUDED.descripcion", (nombre_prod, precio_prod, desc_prod))
             conn.commit()
+            c.close()
             conn.close()
 
             estado_agregar_plat.pop(user_id, None)
@@ -995,10 +1011,11 @@ def manejar_entradas(message):
             nuevo_precio = float(texto_limpio)
             if nuevo_precio < 0: raise ValueError()
             
-            conn = sqlite3.connect("tienda.db")
+            conn = get_db()
             c = conn.cursor()
-            c.execute("UPDATE catalogo_db SET precio = ? WHERE producto = ?", (nuevo_precio, producto))
+            c.execute("UPDATE catalogo_db SET precio = %s WHERE producto = %s", (nuevo_precio, producto))
             conn.commit()
+            c.close()
             conn.close()
 
             bot.reply_to(message, f"✅ **¡Precio actualizado!**\n\n📦 Producto: `{producto}`\n💵 Nuevo precio: `{nuevo_precio:.2f} USDT`", reply_markup=boton_volver_menu(), parse_mode="Markdown")
@@ -1009,10 +1026,11 @@ def manejar_entradas(message):
     # 5. NOTIFICACIÓN GLOBAL
     if user_id == ADMIN_ID and ADMIN_ID in esperando_noti_global:
         esperando_noti_global.discard(ADMIN_ID)
-        conn = sqlite3.connect("tienda.db")
+        conn = get_db()
         c = conn.cursor()
         c.execute("SELECT user_id FROM usuarios")
         todos = [r[0] for r in c.fetchall()]
+        c.close()
         conn.close()
 
         enviados = 0
@@ -1067,11 +1085,12 @@ def manejar_entradas(message):
     if user_id == ADMIN_ID and user_id in estado_carga_admin:
         producto = estado_carga_admin.pop(user_id)
         lineas = [l.strip() for l in texto.split("\n") if l.strip()]
-        conn = sqlite3.connect("tienda.db")
+        conn = get_db()
         c = conn.cursor()
         for cred in lineas:
-            c.execute("INSERT INTO stock (producto, credenciales) VALUES (?, ?)", (producto, cred))
+            c.execute("INSERT INTO stock (producto, credenciales) VALUES (%s, %s)", (producto, cred))
         conn.commit()
+        c.close()
         conn.close()
         bot.reply_to(message, f"✅ Se agregaron `{len(lineas)}` cuentas a *{producto}*.", reply_markup=boton_volver_menu(), parse_mode="Markdown")
         return
@@ -1118,10 +1137,11 @@ def manejar_entradas(message):
         correo_destino = compra_info.get("correo")
 
         order_id = texto
-        conn = sqlite3.connect("tienda.db")
+        conn = get_db()
         c = conn.cursor()
-        c.execute("SELECT order_id FROM pagos_usados WHERE order_id = ?", (order_id,))
+        c.execute("SELECT order_id FROM pagos_usados WHERE order_id = %s", (order_id,))
         if c.fetchone():
+            c.close()
             conn.close()
             bot.reply_to(message, "❌ Este ID de transacción ya fue utilizado en otra compra.", reply_markup=boton_volver_menu())
             return
@@ -1130,18 +1150,20 @@ def manejar_entradas(message):
         exito, resultado = verificar_pago_binance(order_id, total_esperado)
 
         if not exito:
+            c.close()
             conn.close()
             bot.edit_message_text(f"❌ **Error en la validación:**\n{resultado}", message.chat.id, msg_espera.message_id, reply_markup=boton_volver_menu(), parse_mode="Markdown")
             return
 
-        c.execute("INSERT INTO pagos_usados (order_id, user_id, monto) VALUES (?, ?, ?)", (order_id, user_id, total_esperado))
+        c.execute("INSERT INTO pagos_usados (order_id, user_id, monto) VALUES (%s, %s, %s)", (order_id, user_id, total_esperado))
 
         # Caso A: Producto a Correo
         if tipo_compra == "pago_correo":
-            c.execute("INSERT INTO historial_compras (user_id, producto, credenciales, precio) VALUES (?, ?, ?, ?)",
+            c.execute("INSERT INTO historial_compras (user_id, producto, credenciales, precio) VALUES (%s, %s, %s, %s)",
                       (user_id, producto, f"Activación a correo: {correo_destino}", total_esperado))
-            c.execute("UPDATE usuarios SET compras = compras + 1 WHERE user_id = ?", (user_id,))
+            c.execute("UPDATE usuarios SET compras = compras + 1 WHERE user_id = %s", (user_id,))
             conn.commit()
+            c.close()
             conn.close()
             compras_pendientes.pop(user_id, None)
 
@@ -1168,23 +1190,25 @@ def manejar_entradas(message):
             return
 
         # Caso B: Stock Inmediato
-        c.execute("SELECT id, credenciales FROM stock WHERE producto = ? AND vendido = 0 LIMIT ?", (producto, cantidad))
+        c.execute("SELECT id, credenciales FROM stock WHERE producto = %s AND vendido = 0 LIMIT %s", (producto, cantidad))
         filas = c.fetchall()
 
         if len(filas) < cantidad:
+            c.close()
             conn.close()
             bot.edit_message_text("❌ Lo sentimos, el stock se agotó justo al procesar el pago. Contacta a soporte para un reembolso inmediato.", message.chat.id, msg_espera.message_id, reply_markup=boton_volver_menu())
             return
 
         cuentas_entregadas = []
         for sid, cred in filas:
-            c.execute("UPDATE stock SET vendido = 1 WHERE id = ?", (sid,))
+            c.execute("UPDATE stock SET vendido = 1 WHERE id = %s", (sid,))
             cuentas_entregadas.append(cred)
 
-        c.execute("UPDATE usuarios SET compras = compras + 1 WHERE user_id = ?", (user_id,))
-        c.execute("INSERT INTO historial_compras (user_id, producto, credenciales, precio) VALUES (?, ?, ?, ?)",
+        c.execute("UPDATE usuarios SET compras = compras + 1 WHERE user_id = %s", (user_id,))
+        c.execute("INSERT INTO historial_compras (user_id, producto, credenciales, precio) VALUES (%s, %s, %s, %s)",
                   (user_id, producto, " | ".join(cuentas_entregadas), total_esperado))
         conn.commit()
+        c.close()
         conn.close()
         compras_pendientes.pop(user_id, None)
 
@@ -1203,12 +1227,10 @@ def manejar_entradas(message):
     bot.reply_to(message, "💡 Usa `/menu` para ir al inicio:", reply_markup=boton_volver_menu(), parse_mode="Markdown")
 
 # ================= ARRANQUE =================
-# ================= ARRANQUE =================
 if __name__ == "__main__":
-    # Arranca Flask en segundo plano
     keep_alive()
-    print("🚀 Bot SA SHOP Pro Directo 24/7 activo...")
-    # Arranca el bot de Telegram de manera continua
+    print("🚀 Bot SA SHOP Pro 24/7 conectado a Supabase...")
+    
     while True:
         try:
             bot.infinity_polling(timeout=60, long_polling_timeout=60)
