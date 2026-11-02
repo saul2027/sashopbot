@@ -897,13 +897,12 @@ def callbacks(call):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("❌ Cancelar", callback_data="catalogo"))
             
-            try:
-                bot.delete_message(chat_id, msg_id)
-            except Exception:
-                pass
-            
+            # Envía un nuevo mensaje con el QR y los datos sin borrar el anterior para evitar cierres en blanco
             qr_url = "https://i.ibb.co/68Hn6Wf/image-2e9128.png"
-            bot.send_photo(chat_id, qr_url, caption=texto_pago, reply_markup=markup, parse_mode="Markdown")
+            try:
+                bot.send_photo(chat_id, qr_url, caption=texto_pago, reply_markup=markup, parse_mode="Markdown")
+            except Exception:
+                bot.send_message(chat_id, texto_pago, reply_markup=markup, parse_mode="Markdown")
             return
 
         compras_pendientes[user_id]["cantidad"] = cant_actual
