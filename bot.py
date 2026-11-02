@@ -264,7 +264,7 @@ def verificar_pago_binance(order_id_cliente, monto_esperado):
         "BinancePay-Certificate-Serial": BINANCE_API_KEY,
         "BinancePay-Signature": signature
     }
-        print(f"Enviando consulta a Binance para la orden: {order_id_cliente}")
+    print(f"Enviando consulta a Binance para la orden: {order_id_cliente}")
     try:
         resp = requests.post(url, data=body_str, headers=headers, timeout=10).json()
         print(f"Respuesta cruda de Binance: {resp}")
