@@ -241,7 +241,7 @@ def enviar_archivo_txt(chat_id, contenido_texto, nombre_archivo, caption=""):
     bot.send_document(chat_id, archivo_memoria, caption=caption, parse_mode="Markdown", reply_markup=boton_volver_menu())
 
 def verificar_pago_binance(order_id_cliente, monto_esperado):
-    url = "url = "https://bpay.binanceapi.com/binancepay/openapi/v2/order/query"
+    url = "https://bpay.binanceapi.com/binancepay/openapi/v2/order/query"
     timestamp = int(time.time() * 1000)
     query_string = urlencode({"timestamp": timestamp, "limit": 50})
     
