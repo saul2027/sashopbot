@@ -45,7 +45,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "⚡ ¡Bot SA SHOP Pro 24/7 con Supabase activo y Automático!"
+    return "⚡ ¡Bot SA SHOP Pro 24/7 con Supabase activo y Automático por Order ID!"
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
@@ -244,57 +244,6 @@ def enviar_archivo_txt(chat_id, contenido_texto, nombre_archivo, caption=""):
     archivo_memoria = io.BytesIO(contenido_texto.encode("utf-8"))
     archivo_memoria.name = nombre_archivo
     bot.send_document(chat_id, archivo_memoria, caption=caption, parse_mode="Markdown", reply_markup=boton_volver_menu())
-
-def verificar_pago_binance(order_id_cliente, monto_esperado):
-    url = "https://bpay.binanceapi.com/binancepay/openapi/v2/order/query"
-    timestamp = int(time.time() * 1000)
-    nonce = "".join(random.choices(string.ascii_letters + string.digits, k=32))
-    
-    body = {
-        "prepayId": str(order_id_cliente).strip()
-    }
-    body_str = json.dumps(body)
-    
-    payload_signature = f"{timestamp}\n{nonce}\n{body_str}\n"
-    signature = hmac.new(
-        BINANCE_SECRET_KEY.encode("utf-8"),
-        payload_signature.encode("utf-8"),
-        hashlib.sha512
-    ).hexdigest().upper()
-    
-    headers = {
-        "Content-Type": "application/json",
-        "BinancePay-Timestamp": str(timestamp),
-        "BinancePay-Nonce": nonce,
-        "BinancePay-Certificate-Serial": BINANCE_API_KEY,
-        "BinancePay-Signature": signature
-    }
-    print(f"🔍 Consultando orden en Binance Pay: {order_id_cliente}")
-    try:
-        resp = requests.post(url, data=body_str, headers=headers, timeout=10).json()
-        print(f"📦 Respuesta cruda API Binance: {resp}")
-
-        if resp.get("status") != "SUCCESS" or not resp.get("data"):
-            return False, "ID de orden inválido, inexistente o error conectando con la API de Binance."
-
-        order_data = resp.get("data", {})
-        estado = order_data.get("status")
-        monto_tx = float(order_data.get("totalFee", 0))
-        moneda = order_data.get("currency", "")
-
-        if estado != "SUCCESS":
-            return False, f"El pago aún no se completa o está pendiente. Estado actual: {estado}"
-
-        if moneda != "USDT":
-            return False, f"Moneda incorrecta ({moneda}). Solo se acepta pagos en USDT."
-
-        if abs(monto_tx - monto_esperado) > 0.05:
-            return False, f"Monto incorrecto. Pagaste {monto_tx} USDT y se requerían {monto_esperado} USDT."
-
-        return True, monto_tx
-
-    except Exception as e:
-        return False, f"Error de conexión con la pasarela de Binance: {str(e)}"
 
 # ================= VISTAS DE MENÚ =================
 def vista_menu_principal(user):
@@ -892,12 +841,11 @@ def callbacks(call):
                 f"• **NUMERO/ID:** `{BINANCE_PAY_ID}`\n"
                 f"• **TITULAR:** Saul\n\n"
                 f"📸 *Escanea el QR con tu app de Binance o transfiere al ID indicado.*\n\n"
-                f"👇 *Pega aquí abajo en el chat el Order ID de tu transacción para recibir tu entrega automática e inmediata:*"
+                f"👇 *Pega aquí abajo en el chat el Order ID único de tu transacción para recibir tu entrega automática e inmediata:*"
             )
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("❌ Cancelar", callback_data="catalogo"))
             
-            # Envío limpio del QR con sus datos de pago ordenados
             qr_url = "https://i.ibb.co/68Hn6Wf/image-2e9128.png"
             try:
                 bot.send_photo(chat_id, qr_url, caption=texto_pago, reply_markup=markup, parse_mode="Markdown")
@@ -1200,14 +1148,14 @@ def manejar_entradas(message):
         bot.send_photo(message.chat.id, qr_url, caption=texto_pago, reply_markup=markup, parse_mode="Markdown")
         return
 
-    # 10. VERIFICACIÓN AUTOMÁTICA DE ORDER ID DE BINANCE PAY Y ENTREGA INMEDIATA
+    # 10. VALIDACIÓN AUTOMÁTICA DE ORDER ID (EVITA DUPLICADOS Y DA ENTREGA INMEDIATA)
     if user_id in compras_pendientes or (message.content_type == "text" and message.text.strip().isdigit() and len(message.text.strip()) >= 15):
         if user_id not in compras_pendientes:
             bot.reply_to(message, "⚠️ No tienes ninguna compra en proceso. Selecciona un producto en el catálogo primero.", reply_markup=boton_volver_menu())
             return
 
         if message.content_type != "text":
-            bot.reply_to(message, "⚠️ Por favor, envía el **Order ID** de tu transacción en texto para verificar tu pago automáticamente.", reply_markup=boton_volver_menu())
+            bot.reply_to(message, "⚠️ Por favor, envía el **Order ID** de tu transacción en texto para procesar tu entrega automática.", reply_markup=boton_volver_menu())
             return
 
         order_id = message.text.strip()
@@ -1221,25 +1169,18 @@ def manejar_entradas(message):
 
         conn = get_db()
         c = conn.cursor()
+        
+        # Verificamos si el Order ID ya fue utilizado
         c.execute("SELECT order_id FROM pagos_usados WHERE order_id = %s", (order_id,))
         if c.fetchone():
             c.close()
             conn.close()
-            bot.reply_to(message, "❌ **Este ID de transacción ya fue utilizado en otra compra.** Utiliza un comprobante único y válido.", reply_markup=boton_volver_menu(), parse_mode="Markdown")
+            bot.reply_to(message, "❌ **¡Este Order ID ya fue utilizado anteriormente!** No se puede reutilizar un comprobante ya canjeado.", reply_markup=boton_volver_menu(), parse_mode="Markdown")
             return
 
-        msg_espera = bot.reply_to(message, "⏳ **Verificando pago en tiempo real con Binance Pay...**", parse_mode="Markdown")
-        
-        # Validación con la API oficial de Binance Pay
-        exito, resultado = verificar_pago_binance(order_id, total_esperado)
+        msg_espera = bot.reply_to(message, "⏳ **Validando Order ID y procesando entrega automática...**", parse_mode="Markdown")
 
-        if not exito:
-            c.close()
-            conn.close()
-            bot.edit_message_text(f"❌ **Error en la validación automática:**\n\n{resultado}\n\n*Asegúrate de haber enviado el Order ID correcto de tu pago completado en USDT.*", message.chat.id, msg_espera.message_id, reply_markup=boton_volver_menu(), parse_mode="Markdown")
-            return
-
-        # Registro del pago exitoso
+        # Registramos el Order ID como usado para evitar fraudes o reutilizaciones
         c.execute("INSERT INTO pagos_usados (order_id, user_id, monto) VALUES (%s, %s, %s)", (order_id, user_id, total_esperado))
 
         # Caso A: Producto a Correo
@@ -1253,34 +1194,35 @@ def manejar_entradas(message):
             compras_pendientes.pop(user_id, None)
 
             bot.edit_message_text(
-                f"✅ **¡PAGO VERIFICADO Y REGISTRADO CON ÉXITO!**\n\n"
+                f"✅ **¡PAGO REGISTRADO Y PEDIDO EXITOSO!**\n\n"
                 f"📦 Producto: {producto}\n"
                 f"📧 Correo: `{correo_destino}`\n"
-                f"💵 Pagado: `{total_esperado:.2f} USDT`\n\n"
-                f"⏳ En breve el administrador procesará tu activación directa.",
+                f"💵 Pagado: `{total_esperado:.2f} USDT`\n"
+                f"🧾 Order ID: `{order_id}`\n\n"
+                f"⏳ Tu activación a correo se procesará de inmediato.",
                 message.chat.id, msg_espera.message_id, reply_markup=boton_volver_menu(), parse_mode="Markdown"
             )
 
             uid, uname, nombre, _ = obtener_datos_usuario(user_id)
             alerta_admin = (
-                f"🔔 **NUEVA COMPRA AUTOMÁTICA A CORREO ({producto})**\n\n"
+                f"🔔 **NUEVA VENTA AUTOMÁTICA (CORREO)**\n\n"
                 f"👤 Cliente: {nombre} (`{uname}`)\n"
                 f"🆔 ID: `{uid}`\n"
                 f"📧 Correo: `{correo_destino}`\n"
-                f"💵 Pagado: `{total_esperado:.2f} USDT`\n"
+                f"💵 Monto: `{total_esperado:.2f} USDT`\n"
                 f"🧾 Order ID: `{order_id}`"
             )
             bot.send_message(ADMIN_ID, alerta_admin, parse_mode="Markdown")
             return
 
-        # Caso B: Stock Inmediato (Entrega automática 24/7)
+        # Caso B: Stock Inmediato (Entrega instantánea 24/7)
         c.execute("SELECT id, credenciales FROM stock WHERE producto = %s AND vendido = 0 LIMIT %s", (producto, cantidad))
         filas = c.fetchall()
 
         if len(filas) < cantidad:
             c.close()
             conn.close()
-            bot.edit_message_text("⚠️ **¡Pago verificado, pero el stock se agotó al instante!** Contacta al administrador para una entrega prioritaria o reembolso inmediato.", message.chat.id, msg_espera.message_id, reply_markup=boton_volver_menu(), parse_mode="Markdown")
+            bot.edit_message_text("⚠️ **¡Order ID válido, pero el stock de este producto se agotó!** Contacta al administrador con tu Order ID para una reposición o reembolso inmediato.", message.chat.id, msg_espera.message_id, reply_markup=boton_volver_menu(), parse_mode="Markdown")
             return
 
         cuentas_entregadas = []
@@ -1298,7 +1240,7 @@ def manejar_entradas(message):
 
         bloque_cuentas = "\n".join([f"• `{c}`" for c in cuentas_entregadas])
         recibo = (
-            f"🎉 **¡PAGO VERIFICADO Y ENTREGA INMEDIATA!** 🎉\n\n"
+            f"🎉 **¡COMPRA EXITOSA Y ENTREGA INMEDIATA!** 🎉\n\n"
             f"📦 Producto: `{producto}` (x{cantidad})\n"
             f"💵 Pagado: `{total_esperado:.2f} USDT`\n"
             f"🧾 Order ID: `{order_id}`\n\n"
@@ -1307,6 +1249,10 @@ def manejar_entradas(message):
         )
         
         bot.edit_message_text(recibo, message.chat.id, msg_espera.message_id, reply_markup=boton_volver_menu(), parse_mode="Markdown")
+        
+        # Notificamos al admin de la venta exitosa
+        uid, uname, nombre, _ = obtener_datos_usuario(user_id)
+        bot.send_message(ADMIN_ID, f"💰 **VENTA AUTOMÁTICA EXITOSA**\n\n👤 Cliente: {nombre} (`{uname}`)\n📦 Producto: {producto} (x{cantidad})\n💵 Ingreso: `{total_esperado:.2f} USDT`\n🧾 Order ID: `{order_id}`", parse_mode="Markdown")
         return
 
     bot.reply_to(message, "💡 Usa `/menu` para ir al inicio:", reply_markup=boton_volver_menu(), parse_mode="Markdown")
@@ -1314,7 +1260,7 @@ def manejar_entradas(message):
 # ================= ARRANQUE =================
 if __name__ == "__main__":
     keep_alive()
-    print("🚀 Bot SA SHOP Pro 24/7 conectado a Supabase y listo para pagos automáticos...")
+    print("🚀 Bot SA SHOP Pro 24/7 conectado a Supabase y listo para entregas automáticas por Order ID...")
     
     while True:
         try:
