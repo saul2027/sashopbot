@@ -2,6 +2,9 @@ import io
 import time
 import hmac
 import hashlib
+import random
+import string
+import json
 import psycopg2
 import requests
 import os
@@ -21,23 +24,22 @@ BINANCE_PAY_ID = "884195829"
 BINANCE_API_KEY = "NCztoP5SVCX71cehqZeKTdEOntTGpYDRw3M0NNpSEgxFifgtiMErhbsSIcnVn4TW"
 BINANCE_SECRET_KEY = "31skkrCvejqUclA2tn5A5gprMZ3t8HvfVn1FTKYZvpn5eqUbEyG2de5ftR5oW4tL"
 
-# Tu enlace de Supabase (Reemplaza [YOUR-PASSWORD] por tu contraseña real)
 DATABASE_URL = "postgresql://postgres:saul20262026202@db.lckxsqdgmawjytbnzqab.supabase.co:5432/postgres"
 
 CATALOGO_INICIAL = {
-    "Gemini Pro": (3.00, "Cuenta completa email:pass"),
-    "ChatGPT Plus": (4.50, "Cuenta completa email:pass"),
-    "Netflix Completa": (6.50, "Perfil o pantalla email:pass"),
-    "Disney+ Completa": (4.00, "Cuenta completa email:pass"),
-    "Max Completa": (3.50, "Cuenta completa email:pass"),
-    "Prime Video Completa": (3.00, "Cuenta completa email:pass"),
+    "Gemini Pro link 18 month": (3.00, "link de activacion"),
+    "Max Completa": (1.50, "Cuenta completa email:pass"),
+    "Prime Video 6 month": (2.50, "Cuenta completa email:pass"),
     "Spotify Individual": (2.00, "Invitación o cuenta email:pass"),
-    "Crunchyroll Mega Fan": (2.50, "Cuenta completa email:pass"),
-    "Canva Pro": (1.50, "Activación directa a tu correo")
+    "Crunchyroll link 1 Month": (0.50, "Cuenta completa email:pass"),
+    "Canva Pro a correo 12 meses": (1.00, "Activación directa a tu correo")
+    "Surf Shark 10 dias": (1.00, "Cuenta Privada email:pass"),
+    "Surf Shark 12 meses": (9.00, "Cuenta Privada email:pass"),
+    "Apple TV 1 mes Link": (1.00, "Link de Activacion"),
 }
 
 # =====================================================================
-# 🌐 MINI SERVIDOR WEB PARA 24/7 (RENDER / KOYEB) 🌐
+# 🌐 MINI SERVIDOR WEB PARA 24/7
 # =====================================================================
 app = Flask('')
 
@@ -60,6 +62,7 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 compras_pendientes = {}
 estado_carga_admin = {}
+estado_carga_lote = {}
 estado_precio_admin = {}
 estado_mod_nombre = {}
 estado_mod_desc = {}
@@ -152,6 +155,7 @@ def configurar_menu_comandos():
         comandos_admin = comandos_publicos + [
             BotCommand("cmds", "👑 Panel de Administración"),
             BotCommand("cargar", "📥 Subir Stock"),
+            BotCommand("cargar_lote", "📦 Cargar Lote Masivo (>30 cuentas)"),
             BotCommand("agregar_plataforma", "➕ Agregar plataforma"),
             BotCommand("quitar_plataforma", "🗑️ Eliminar plataforma"),
             BotCommand("modificar_nombre", "✏️ Cambiar nombre"),
@@ -222,6 +226,7 @@ def buscar_producto_nombre(texto_busqueda):
 def limpiar_estados_usuario(user_id):
     compras_pendientes.pop(user_id, None)
     estado_carga_admin.pop(user_id, None)
+    estado_carga_lote.pop(user_id, None)
     estado_precio_admin.pop(user_id, None)
     estado_mod_nombre.pop(user_id, None)
     estado_mod_desc.pop(user_id, None)
@@ -270,7 +275,7 @@ def verificar_pago_binance(order_id_cliente, monto_esperado):
         print(f"Respuesta cruda de Binance: {resp}")
 
         if resp.get("status") != "SUCCESS" or not resp.get("data"):
-            return False, "Error conectando con la API de Binance."
+            return False, "Error conectando con la API de Binance o ID inválido."
 
         order_data = resp.get("data", {})
         estado = order_data.get("status")
@@ -355,7 +360,7 @@ def cmd_buy_directo(message):
 # ================= COMANDOS DE ADMIN =================
 TEXTO_CMDS_ADMIN = (
     "╔════════════════════════════════╗\n"
-    "║     👑 **PANEL DE CONTROL ADMIN**     ║\n"
+    "║     👑 **PANEL DE CONTROL ADMIN**      ║\n"
     "╚════════════════════════════════╝\n\n"
     "📦 **GESTIÓN DE CATÁLOGO Y STOCK**\n"
     "  • `/agregar_plataforma` ➔ Crear nuevo producto\n"
@@ -363,7 +368,8 @@ TEXTO_CMDS_ADMIN = (
     "  • `/modificar_nombre` ➔ Cambiar nombre de plataforma\n"
     "  • `/modificar_precio` ➔ Cambiar precio de producto\n"
     "  • `/modificar_descripcion` ➔ Cambiar descripción/modalidad\n"
-    "  • `/cargar` ➔ Subir cuentas por lotes\n"
+    "  • `/cargar` ➔ Subir cuentas por lotes estándar\n"
+    "  • `/cargar_lote` ➔ Carga masiva (30 a 1000+ cuentas/links)\n"
     "  • `/stock` ➔ Ver reporte y descargar TXT general\n"
     "  • `/borrar [ID]` ➔ Eliminar cuenta específica\n"
     "  • `/vaciar [nombre]` ➔ Limpiar stock no vendido\n\n"
@@ -482,7 +488,7 @@ def cmd_consultar_stock(message):
     catalogo = obtener_catalogo()
     
     if len(partes) == 1:
-        lineas = ["📊 **ESTADO GENERAL DEL INVENTARIO Y CATÁLOGO**\n"]
+        lineas = ["📊 **ESTADO GENERAL DEL INVENTARIO Y CATÁLOGOS**\n"]
         for prod, info in catalogo.items():
             precio = info["precio"]
             desc = info["desc"]
@@ -569,7 +575,32 @@ def cmd_cargar_menu(message):
 
     bot.reply_to(
         message,
-        "📥 **PANEL DE CARGA DE INVENTARIO**\n\nSelecciona el producto al que deseas subir cuentas:",
+        "📥 **PANEL DE CARGA DE INVENTARIO**\n\nSelecciona el producto al que deseas subir cuentas (formato `email:pass` o `link`):",
+        reply_markup=markup,
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(commands=["cargar_lote"])
+def cmd_cargar_lote(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    limpiar_estados_usuario(ADMIN_ID)
+    catalogo = obtener_catalogo()
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    botones = []
+    for prod, info in catalogo.items():
+        if "correo" in info["desc"].lower() or "activación" in info["desc"].lower():
+            continue
+        cant = contar_stock(prod)
+        color = "🟢" if cant > 0 else "🔴"
+        botones.append(InlineKeyboardButton(f"{color} {prod} ({cant})", callback_data=f"lotecar_{prod}"))
+    markup.add(*botones)
+    markup.add(InlineKeyboardButton("🏠 Menú Principal", callback_data="inicio"))
+
+    bot.reply_to(
+        message,
+        "📦 **CARGA MASIVA DE LOTES (30 a 1000+ cuentas)**\n\nSelecciona el producto al que cargarás el lote masivo:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
@@ -852,18 +883,30 @@ def callbacks(call):
             compras_pendientes[user_id]["cantidad"] = cant_actual
             total_pagar = cant_actual * precio_unit
             
+            # Formato de pago ordenado con los datos de Binance Pay y el QR solicitado
             texto_pago = (
-                f"💎 **PAGO DIRECTO CON BINANCE PAY** 💎\n\n"
-                f"📦 **Producto:** {producto} (x{cant_actual})\n"
-                f"💵 **Total a depositar:** `{total_pagar:.2f} USDT`\n\n"
-                f"1️⃣ Abre Binance y ve a **Pay ➔ Enviar**.\n"
-                f"2️⃣ Envía exactos **{total_pagar:.2f} USDT** al ID:\n"
-                f"👉 `{BINANCE_PAY_ID}`\n\n"
-                f"3️⃣ **Pega aquí abajo en el chat el Order ID** de tu transacción para recibir tu entrega inmediata:"
+                f"💎 *PAGO DIRECTO CON BINANCE PAY* 💎\n\n"
+                f"📦 **Producto:** {producto} (x{cant_actual})\n\n"
+                f"📌 *DETALLES DE PAGO:*\n"
+                f"• **METODO:** BINANCE\n"
+                f"• **MONTO:** `{total_pagar:.2f} USDT`\n"
+                f"• **NUMERO/ID:** `{BINANCE_PAY_ID}`\n"
+                f"• **TITULAR:** Saul\n\n"
+                f"📸 *Escanea el QR de arriba con tu app de Binance o copia el ID para transferir.* \n\n"
+                f"👇 *Pega aquí abajo en el chat el Order ID de tu transacción para recibir tu entrega inmediata:*"
             )
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("❌ Cancelar", callback_data="catalogo"))
-            bot.edit_message_text(texto_pago, chat_id, msg_id, reply_markup=markup, parse_mode="Markdown")
+            
+            # Borramos el mensaje anterior y enviamos la foto del QR de Binance junto con el texto de pago
+            try:
+                bot.delete_message(chat_id, msg_id)
+            except Exception:
+                pass
+            
+            # Usamos el enlace directo del QR proporcionado
+            qr_url = "https://i.ibb.co/68Hn6Wf/image-2e9128.png"
+            bot.send_photo(chat_id, qr_url, caption=texto_pago, reply_markup=markup, parse_mode="Markdown")
             return
 
         compras_pendientes[user_id]["cantidad"] = cant_actual
@@ -879,7 +922,19 @@ def callbacks(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("❌ Cancelar", callback_data="inicio"))
         bot.edit_message_text(
-            f"📥 **Cargando stock para:** `{producto}`\n\nEnvía las cuentas en formato `correo:contraseña` (varias líneas permitidas):",
+            f"📥 **Cargando stock (Estándar) para:** `{producto}`\n\nEnvía las cuentas o links (formato `email:pass` o `link`, una por línea):",
+            chat_id, msg_id, reply_markup=markup, parse_mode="Markdown"
+        )
+
+    elif call.data.startswith("lotecar_"):
+        if user_id != ADMIN_ID:
+            return
+        producto = call.data.split("_", 1)[1]
+        estado_carga_lote[user_id] = producto
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("❌ Cancelar", callback_data="inicio"))
+        bot.edit_message_text(
+            f"📦 **Carga Masiva de Lote para:** `{producto}`\n\nPega tu bloque completo (30 hasta 1000+ líneas, formato libre `email:pass` o `link`, una por línea):",
             chat_id, msg_id, reply_markup=markup, parse_mode="Markdown"
         )
 
@@ -911,7 +966,7 @@ def callbacks(call):
         esperando_ticket_soporte.add(user_id)
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("💬 Ir a Soporte Directo", url=f"https://t.me/{ADMIN_USERNAME.lstrip('@')}"),
-                   InlineKeyboardButton("🏠 Menú Principal", callback_data="inicio"))
+                     InlineKeyboardButton("🏠 Menú Principal", callback_data="inicio"))
         bot.edit_message_text(
             "🛠️ **CENTRO DE SOPORTE**\n\nEscribe directamente tu consulta o reporte en el chat y el administrador te atenderá:",
             chat_id, msg_id, reply_markup=markup, parse_mode="Markdown"
@@ -1095,18 +1150,27 @@ def manejar_entradas(message):
 
     texto = message.text.strip()
 
-    # 8. CARGA DE STOCK ADMIN
-    if user_id == ADMIN_ID and user_id in estado_carga_admin:
-        producto = estado_carga_admin.pop(user_id)
+    # 8. CARGA DE STOCK ADMIN (Estándar o Lote Masivo)
+    if user_id == ADMIN_ID and (user_id in estado_carga_admin or user_id in estado_carga_lote):
+        producto = estado_carga_admin.pop(user_id, None) or estado_carga_lote.pop(user_id, None)
         lineas = [l.strip() for l in texto.split("\n") if l.strip()]
+        
+        if not lineas:
+            bot.reply_to(message, "❌ El bloque enviado está vacío. Inténtalo de nuevo.", reply_markup=boton_volver_menu())
+            return
+
         conn = get_db()
         c = conn.cursor()
-        for cred in lineas:
-            c.execute("INSERT INTO stock (producto, credenciales) VALUES (%s, %s)", (producto, cred))
+        
+        # Inserción optimizada por lotes para soportar de 30 a 1000+ cuentas/links
+        registros = [(producto, cred) for cred in lineas]
+        c.executemany("INSERT INTO stock (producto, credenciales) VALUES (%s, %s)", registros)
+        
         conn.commit()
         c.close()
         conn.close()
-        bot.reply_to(message, f"✅ Se agregaron `{len(lineas)}` cuentas a *{producto}*.", reply_markup=boton_volver_menu(), parse_mode="Markdown")
+        
+        bot.reply_to(message, f"✅ **¡Carga exitosa!**\nSe agregaron correctamente `{len(lineas)}` accesos/cuentas al producto *{producto}*.", reply_markup=boton_volver_menu(), parse_mode="Markdown")
         return
 
     # 9. CORREO PARA PRODUCTOS A CORREO
@@ -1123,17 +1187,21 @@ def manejar_entradas(message):
         
         total_pagar = precio
         texto_pago = (
-            f"💎 **PAGO DIRECTO CON BINANCE PAY**\n\n"
+            f"💎 *PAGO DIRECTO CON BINANCE PAY* 💎\n\n"
             f"📦 Producto: {producto} (Activación a correo)\n"
-            f"📧 Correo: `{texto}`\n"
-            f"💵 **Total a pagar:** `{total_pagar:.2f} USDT`\n\n"
-            f"Envía exactos **{total_pagar:.2f} USDT** al Binance Pay ID:\n"
-            f"👉 `{BINANCE_PAY_ID}`\n\n"
-            f"Pega aquí tu **Order ID** de pago:"
+            f"📧 Correo: `{texto}`\n\n"
+            f"📌 *DETALLES DE PAGO:*\n"
+            f"• **METODO:** BINANCE\n"
+            f"• **MONTO:** `{total_pagar:.2f} USDT`\n"
+            f"• **NUMERO/ID:** `{BINANCE_PAY_ID}`\n"
+            f"• **TITULAR:** Saul\n\n"
+            f"📸 *Escanea el QR con tu app de Binance o transfiere al ID.* Pega aquí tu **Order ID** de pago:"
         )
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("❌ Cancelar", callback_data="catalogo"))
-        bot.reply_to(message, texto_pago, reply_markup=markup, parse_mode="Markdown")
+        
+        qr_url = "https://i.ibb.co/68Hn6Wf/image-2e9128.png"
+        bot.send_photo(message.chat.id, qr_url, caption=texto_pago, reply_markup=markup, parse_mode="Markdown")
         return
 
     # 10. VERIFICACIÓN DE ORDER ID DE BINANCE PAY Y ENTREGA INMEDIATA
