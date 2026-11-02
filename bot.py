@@ -265,7 +265,7 @@ def verificar_pago_binance(order_id_cliente, monto_esperado):
         "BinancePay-Signature": signature
     }
     
-            try:
+try:
         resp = requests.post(url, data=body_str, headers=headers, timeout=10).json()
 
         if resp.get("status") != "SUCCESS" or not resp.get("data"):
