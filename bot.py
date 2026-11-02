@@ -32,7 +32,7 @@ CATALOGO_INICIAL = {
     "Prime Video 6 month": (2.50, "Cuenta completa email:pass"),
     "Spotify Individual": (2.00, "Invitación o cuenta email:pass"),
     "Crunchyroll link 1 Month": (0.50, "Cuenta completa email:pass"),
-    "Canva Pro a correo 12 meses": (1.00, "Activación directa a tu correo")
+    "Canva Pro a correo 12 meses": (1.00, "Activación directa a tu correo"),
     "Surf Shark 10 dias": (1.00, "Cuenta Privada email:pass"),
     "Surf Shark 12 meses": (9.00, "Cuenta Privada email:pass"),
     "Apple TV 1 mes Link": (1.00, "Link de Activacion"),
