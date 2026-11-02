@@ -69,7 +69,7 @@ estado_notificacion_admin = {}
 esperando_noti_global = set()
 
 def get_db():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect("postgresql://postgres.lckxsqdgmawjytbnzqab:saul20262026202@aws-0-us-east-1.pooler.supabase.com:6543/postgres")
 
 def init_db():
     conn = get_db()
